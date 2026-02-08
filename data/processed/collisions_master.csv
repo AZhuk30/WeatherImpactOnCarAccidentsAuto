@@ -1,0 +1,6 @@
+date,collisions,borough,weather_condition,severity,latitude,longitude
+2024-12-01,124,Manhattan,Clear,Minor,40.7831,-73.9712
+2024-12-01,98,Brooklyn,Rain,Moderate,40.6782,-73.9442
+2024-12-02,145,Queens,Snow,Severe,40.7282,-73.7949
+2024-12-02,112,Bronx,Fog,Minor,40.8448,-73.8648
+2024-12-03,89,Staten Island,Clear,Moderate,40.5795,-74.1502
