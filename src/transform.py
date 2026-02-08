@@ -1,3 +1,9 @@
+import pandas as pd
+import logging
+import numpy as np  # Add this import
+
+logger = logging.getLogger(__name__)
+
 """
 Data transformation for NYC Traffic Safety
 Transforms raw extracted data into analysis-ready format
