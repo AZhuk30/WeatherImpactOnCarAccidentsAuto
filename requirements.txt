@@ -6,3 +6,6 @@ numpy==2.0.0
 requests==2.32.5
 python-dateutil==2.9.0
 pytz==2025.2
+openmeteo-requests==1.3.0  # Add this
+requests-cache==1.3.0      # Add this
+retry-requests==1.0.4      # Add this
