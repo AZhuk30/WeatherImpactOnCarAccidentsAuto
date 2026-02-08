@@ -1,0 +1,135 @@
+name: Daily Data Update Pipeline
+
+# When to run this workflow
+on:
+  schedule:
+    # Runs every day at 2 AM UTC (9 PM EST previous day)
+    - cron: '0 2 * * *'
+  
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+    inputs:
+      date_range:
+        description: 'Number of days to pull (default: 30)'
+        required: false
+        default: '30'
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Step 1: Get the code from your repo
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      # Step 2: Set up Python
+      - name: 🐍 Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      
+      # Step 3: Install dependencies
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      # Step 4: Create necessary directories
+      - name: 📁 Create data directories
+        run: |
+          mkdir -p data/raw
+          mkdir -p data/processed
+          mkdir -p data/logs
+      
+      # Step 5: Run the pipeline (CSV mode - no database)
+      - name: 🚀 Run ETL Pipeline
+        run: |
+          python run_pipeline.py --days ${{ github.event.inputs.date_range || '30' }}
+        env:
+          SKIP_DATABASE: 'true'
+          PYTHONUNBUFFERED: '1'
+      
+      # Step 6: Check if data was generated
+      - name: ✅ Verify data files
+        run: |
+          echo "Checking for processed data files..."
+          ls -lh data/processed/
+          
+          if [ -f "data/processed/weather_master.csv" ]; then
+            echo "✅ Weather master file exists"
+            wc -l data/processed/weather_master.csv
+          else
+            echo "❌ Weather master file missing!"
+            exit 1
+          fi
+          
+          if [ -f "data/processed/collisions_master.csv" ]; then
+            echo "✅ Collisions master file exists"
+            wc -l data/processed/collisions_master.csv
+          else
+            echo "❌ Collisions master file missing!"
+            exit 1
+          fi
+      
+      # Step 7: Commit and push updated data back to repo
+      - name: 💾 Commit updated data
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          # Add the master CSV files
+          git add data/processed/weather_master.csv || true
+          git add data/processed/collisions_master.csv || true
+          
+          # Add timestamped backups
+          git add data/processed/weather_*.csv || true
+          git add data/processed/collisions_*.csv || true
+          
+          # Add logs
+          git add data/logs/*.txt || true
+          git add data/logs/*.log || true
+          
+          # Check if there are changes
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "🤖 Auto-update: Data refresh $(date +'%Y-%m-%d %H:%M UTC')"
+            git push
+            echo "✅ Successfully pushed updated data"
+          fi
+      
+      # Step 8: Create a summary
+      - name: 📊 Generate summary
+        if: always()
+        run: |
+          echo "## Pipeline Run Summary" >> $GITHUB_STEP_SUMMARY
+          echo "**Date:** $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f "data/processed/weather_master.csv" ]; then
+            WEATHER_COUNT=$(wc -l < data/processed/weather_master.csv)
+            echo "✅ Weather records: $WEATHER_COUNT" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -f "data/processed/collisions_master.csv" ]; then
+            COLLISION_COUNT=$(wc -l < data/processed/collisions_master.csv)
+            echo "✅ Collision records: $COLLISION_COUNT" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🔗 [View Dashboard](https://weatherimpact-nyc.streamlit.app)" >> $GITHUB_STEP_SUMMARY
+      
+      # Step 9: Upload logs as artifacts (viewable in GitHub)
+      - name: 📎 Upload logs
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: pipeline-logs-${{ github.run_number }}
+          path: |
+            data/logs/*.log
+            data/logs/*.txt
+          retention-days: 30
