@@ -1,3 +1,28 @@
+def extract(self, start_date=None, end_date=None):
+    """Extract weather data - returns DataFrame"""
+    try:
+        logger.info(f"🌤️  Extracting weather data")
+        
+        if end_date is None:
+            end_date = datetime.now().strftime("%Y-%m-%d")
+        if start_date is None:
+            start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+        
+        dates = pd.date_range(start=start_date, end=end_date, freq='D')
+        
+        # ADD THIS LINE:
+        boroughs = ['MANHATTAN', 'BROOKLYN', 'QUEENS', 'BRONX', 'STATEN ISLAND']
+        
+        # Create sample weather data
+        weather_data = []
+        for date in dates:
+            for borough in boroughs:  # Now boroughs is defined
+                # Simulate weather patterns
+                day_num = (date - dates[0]).days
+                temp = 40 + (day_num % 20) + (boroughs.index(borough) * 2)
+                # ... rest of your code
+
+
 """
 Simplified extraction for GitHub Actions - no external dependencies
 """
