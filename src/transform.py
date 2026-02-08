@@ -124,3 +124,29 @@ def transform_collision_data(collisions_df):
     except Exception as e:
         logger.error(f"❌ Collision transformation failed: {e}")
         return pd.DataFrame()
+
+
+def run_transformation(weather_df, collisions_df):
+    """
+    Main transformation function that runs both transformations
+    
+    Args:
+        weather_df (pd.DataFrame): Raw weather data
+        collisions_df (pd.DataFrame): Raw collision data
+    
+    Returns:
+        tuple: Transformed weather and collision DataFrames
+    """
+    logger.info("🔄 Running data transformation")
+    
+    # Transform weather data
+    transformed_weather = transform_weather_data(weather_df)
+    
+    # Transform collision data
+    transformed_collisions = transform_collision_data(collisions_df)
+    
+    logger.info(f"✅ Transformation complete:")
+    logger.info(f"   - Weather: {len(transformed_weather)} records")
+    logger.info(f"   - Collisions: {len(transformed_collisions)} records")
+    
+    return transformed_weather, transformed_collisions
