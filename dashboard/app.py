@@ -1,16 +1,423 @@
+"""
+Streamlit Dashboard for NYC Traffic Safety Analysis
+SIMPLIFIED VERSION - Works with sample data
+"""
 import streamlit as st
-
-st.title("🎉 Hello from Streamlit!")
-st.write("If you see this, your deployment works!")
-st.success("✅ App is running successfully")
-
-# Show Python version
-import sys
-st.write(f"Python version: {sys.version}")
-
-# Show current directory and files
+import pandas as pd
+import plotly.express as px
+from datetime import datetime, date
 import os
-st.write(f"Current directory: {os.getcwd()}")
-st.write("Files in current directory:")
-for item in os.listdir(".")[:20]:
-    st.write(f"  - {item}")
+
+# Page configuration
+st.set_page_config(
+    page_title="NYC Traffic Safety - Weather Impact",
+    page_icon="🚗",
+    layout="wide"
+)
+
+# Title
+st.title("🚗 NYC Traffic Safety - Weather Impact Analysis")
+st.markdown("Real-time analysis of weather's impact on NYC traffic collisions")
+
+# Add last update indicator
+st.sidebar.markdown("### 📊 Dashboard Info")
+st.sidebar.info("Data updates automatically via GitHub Actions daily at 2 AM UTC")
+
+# Load data from master CSV files
+@st.cache_data(ttl=3600)
+def load_data():
+    """
+    Load master CSV files
+    """
+    try:
+        # Check if files exist
+        if not os.path.exists("data/processed/weather_master.csv"):
+            st.error("weather_master.csv not found")
+            return None, None
+            
+        if not os.path.exists("data/processed/collisions_master.csv"):
+            st.error("collisions_master.csv not found")
+            return None, None
+        
+        # Load files
+        weather_df = pd.read_csv("data/processed/weather_master.csv")
+        collisions_df = pd.read_csv("data/processed/collisions_master.csv")
+        
+        # Convert date columns
+        if 'date' in weather_df.columns:
+            weather_df['date'] = pd.to_datetime(weather_df['date'])
+        
+        if 'date' in collisions_df.columns:
+            collisions_df['date'] = pd.to_datetime(collisions_df['date'])
+        elif 'crash_date' in collisions_df.columns:
+            collisions_df['date'] = pd.to_datetime(collisions_df['crash_date'])
+        
+        return weather_df, collisions_df
+        
+    except Exception as e:
+        st.error(f"Error loading data: {str(e)}")
+        return None, None
+
+# Load data
+with st.spinner('Loading data...'):
+    weather_df, collisions_df = load_data()
+
+if weather_df is not None and collisions_df is not None and len(weather_df) > 0 and len(collisions_df) > 0:
+    
+    # ========== SIDEBAR FILTERS ==========
+    st.sidebar.header("🔍 Filters")
+    
+    # Borough filter
+    boroughs = ['ALL'] + sorted(collisions_df['borough'].dropna().unique().tolist())
+    selected_borough = st.sidebar.selectbox("Select Borough", boroughs)
+    
+    # Date range filter
+    if 'date' in collisions_df.columns:
+        min_date = collisions_df['date'].min().date()
+        max_date = collisions_df['date'].max().date()
+        
+        date_range = st.sidebar.date_input(
+            "Date Range",
+            value=(min_date, max_date),
+            min_value=min_date,
+            max_value=max_date
+        )
+        
+        if len(date_range) == 2:
+            start_date, end_date = date_range
+        else:
+            start_date = end_date = date_range[0]
+    
+    # Weather condition filter
+    if 'condition' in weather_df.columns:
+        weather_conditions = ['ALL'] + sorted(weather_df['condition'].dropna().unique().tolist())
+        selected_weather = st.sidebar.selectbox("Weather Condition", weather_conditions)
+    
+    # Apply filters
+    filtered_collisions = collisions_df.copy()
+    filtered_weather = weather_df.copy()
+    
+    # Filter by borough
+    if selected_borough != 'ALL':
+        filtered_collisions = filtered_collisions[filtered_collisions['borough'] == selected_borough]
+        filtered_weather = filtered_weather[filtered_weather['borough'] == selected_borough]
+    
+    # Filter by date range
+    if 'date' in filtered_collisions.columns:
+        filtered_collisions = filtered_collisions[
+            (filtered_collisions['date'].dt.date >= start_date) &
+            (filtered_collisions['date'].dt.date <= end_date)
+        ]
+    
+    if 'date' in filtered_weather.columns:
+        filtered_weather = filtered_weather[
+            (filtered_weather['date'].dt.date >= start_date) &
+            (filtered_weather['date'].dt.date <= end_date)
+        ]
+    
+    # Filter by weather
+    if 'selected_weather' in locals() and selected_weather != 'ALL':
+        filtered_weather = filtered_weather[filtered_weather['condition'] == selected_weather]
+    
+    # ========== DASHBOARD METRICS ==========
+    st.header("📊 Key Metrics")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        total_collisions = len(filtered_collisions)
+        st.metric("Total Collisions", f"{total_collisions:,}")
+    
+    with col2:
+        if 'persons_injured' in filtered_collisions.columns:
+            total_injuries = filtered_collisions['persons_injured'].sum()
+            st.metric("Total Injuries", f"{int(total_injuries):,}")
+        else:
+            st.metric("Total Injuries", "N/A")
+    
+    with col3:
+        if 'persons_killed' in filtered_collisions.columns:
+            total_fatalities = filtered_collisions['persons_killed'].sum()
+            st.metric("Total Fatalities", int(total_fatalities))
+        else:
+            st.metric("Total Fatalities", "N/A")
+    
+    with col4:
+        # Calculate collisions per day
+        if len(filtered_collisions) > 0 and 'date' in filtered_collisions.columns:
+            days_count = (filtered_collisions['date'].max() - filtered_collisions['date'].min()).days + 1
+            if days_count > 0:
+                daily_avg = total_collisions / days_count
+                st.metric("Avg Daily Collisions", f"{daily_avg:.1f}")
+            else:
+                st.metric("Avg Daily", "N/A")
+        else:
+            st.metric("Avg Daily", "N/A")
+    
+    # ========== VISUALIZATIONS ==========
+    st.header("📈 Analysis Visualizations")
+    
+    tab1, tab2, tab3, tab4 = st.tabs(["Collision Patterns", "Weather Impact", "Time Analysis", "Data Explorer"])
+    
+    with tab1:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if 'borough' in filtered_collisions.columns and len(filtered_collisions) > 0:
+                borough_counts = filtered_collisions['borough'].value_counts().reset_index()
+                borough_counts.columns = ['borough', 'count']
+                
+                fig = px.bar(
+                    borough_counts, 
+                    x='borough', 
+                    y='count',
+                    title="Collisions by Borough",
+                    color='count',
+                    color_continuous_scale='reds',
+                    labels={'count': 'Number of Collisions'}
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No collision data for selected filters")
+        
+        with col2:
+            # Create severity from injuries/killed
+            if 'persons_injured' in filtered_collisions.columns and 'persons_killed' in filtered_collisions.columns:
+                def assign_severity(row):
+                    if row['persons_killed'] > 0:
+                        return 'Fatal'
+                    elif row['persons_injured'] >= 3:
+                        return 'Severe'
+                    elif row['persons_injured'] > 0:
+                        return 'Injury'
+                    else:
+                        return 'Property Damage'
+                
+                filtered_collisions['severity'] = filtered_collisions.apply(assign_severity, axis=1)
+                severity_counts = filtered_collisions['severity'].value_counts().reset_index()
+                severity_counts.columns = ['severity', 'count']
+                
+                fig = px.pie(
+                    severity_counts, 
+                    values='count', 
+                    names='severity',
+                    title="Collision Severity Distribution",
+                    hole=0.3,
+                    color_discrete_sequence=px.colors.sequential.Reds_r
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No severity data available")
+    
+    with tab2:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Simple weather vs collisions
+            if 'condition' in filtered_weather.columns and 'weather_condition' in filtered_collisions.columns:
+                # Count collisions by weather
+                weather_collisions = filtered_collisions['weather_condition'].value_counts().reset_index()
+                weather_collisions.columns = ['weather', 'collisions']
+                
+                fig = px.bar(
+                    weather_collisions, 
+                    x='weather', 
+                    y='collisions',
+                    title="Collisions by Weather Condition",
+                    color='collisions',
+                    color_continuous_scale='blues',
+                    labels={'collisions': 'Number of Collisions'}
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No weather condition data available")
+        
+        with col2:
+            if 'temperature' in filtered_weather.columns and len(filtered_weather) > 0:
+                fig = px.histogram(
+                    filtered_weather, 
+                    x='temperature',
+                    title="Temperature Distribution (°F)",
+                    nbins=20,
+                    color_discrete_sequence=['orange'],
+                    labels={'temperature': 'Temperature (°F)'}
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No temperature data available")
+    
+    with tab3:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if len(filtered_collisions) > 0 and 'date' in filtered_collisions.columns:
+                # Daily trend
+                daily_collisions = filtered_collisions.groupby(
+                    filtered_collisions['date'].dt.date
+                ).size().reset_index()
+                daily_collisions.columns = ['date', 'collisions']
+                
+                fig = px.line(
+                    daily_collisions, 
+                    x='date', 
+                    y='collisions',
+                    title="Daily Collision Trend",
+                    labels={'date': 'Date', 'collisions': 'Number of Collisions'}
+                )
+                fig.update_traces(line_color='#1f77b4')
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No data for daily trend")
+        
+        with col2:
+            if 'condition' in filtered_weather.columns and len(filtered_weather) > 0:
+                # Weather frequency
+                weather_counts = filtered_weather['condition'].value_counts().reset_index()
+                weather_counts.columns = ['condition', 'count']
+                
+                fig = px.pie(
+                    weather_counts,
+                    values='count',
+                    names='condition',
+                    title="Weather Condition Frequency",
+                    hole=0.3
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No weather data available")
+    
+    with tab4:
+        st.subheader("📋 Data Preview")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("**Weather Data**")
+            st.dataframe(
+                filtered_weather.head(50),
+                use_container_width=True,
+                height=300
+            )
+            
+            # Show weather stats
+            if 'temperature' in filtered_weather.columns:
+                st.write("**Weather Statistics:**")
+                st.write(f"- Avg Temperature: {filtered_weather['temperature'].mean():.1f}°F")
+                st.write(f"- Rainy Days: {len(filtered_weather[filtered_weather['condition'].str.contains('Rain', na=False)])}")
+        
+        with col2:
+            st.write("**Collisions Data**")
+            st.dataframe(
+                filtered_collisions.head(50),
+                use_container_width=True,
+                height=300
+            )
+            
+            # Show collision stats
+            st.write("**Collision Statistics:**")
+            st.write(f"- Total Collisions: {len(filtered_collisions)}")
+            if 'persons_injured' in filtered_collisions.columns:
+                st.write(f"- Injury Rate: {(filtered_collisions['persons_injured'] > 0).sum() / len(filtered_collisions) * 100:.1f}%")
+    
+    # ========== INSIGHTS ==========
+    st.header("💡 Insights & Summary")
+    
+    insights = []
+    
+    if len(filtered_collisions) > 0:
+        # Borough with most collisions
+        if 'borough' in filtered_collisions.columns:
+            top_borough = filtered_collisions['borough'].value_counts().index[0]
+            insights.append(f"**{top_borough}** has the most collisions in the selected period")
+        
+        # Weather impact
+        if 'weather_condition' in filtered_collisions.columns:
+            weather_counts = filtered_collisions['weather_condition'].value_counts()
+            if 'Rain' in weather_counts.index:
+                rain_percentage = (weather_counts['Rain'] / len(filtered_collisions)) * 100
+                insights.append(f"**{rain_percentage:.1f}%** of collisions occurred during rainy conditions")
+        
+        # Time pattern
+        if len(filtered_collisions) > 10:
+            insights.append(f"Average of **{len(filtered_collisions)/30:.1f} collisions per day** in the selected period")
+    
+    if insights:
+        for insight in insights:
+            st.info(insight)
+    else:
+        st.info("Select filters and load data to see insights")
+    
+    # ========== DATA DOWNLOAD ==========
+    st.header("📥 Export Data")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if len(filtered_weather) > 0:
+            weather_csv = filtered_weather.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📊 Download Weather Data (CSV)",
+                data=weather_csv,
+                file_name=f"nyc_weather_{start_date}_{end_date}.csv",
+                mime="text/csv"
+            )
+        else:
+            st.warning("No weather data to download")
+    
+    with col2:
+        if len(filtered_collisions) > 0:
+            collisions_csv = filtered_collisions.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="🚗 Download Collisions Data (CSV)",
+                data=collisions_csv,
+                file_name=f"nyc_collisions_{start_date}_{end_date}.csv",
+                mime="text/csv"
+            )
+        else:
+            st.warning("No collision data to download")
+
+else:
+    # Show loading/error state
+    if weather_df is None or collisions_df is None:
+        st.error("""
+        ## ⚠️ Data Files Not Found
+        
+        Master data files are missing. Please:
+        
+        1. **Run the ETL pipeline:**
+           ```bash
+           python run_pipeline.py
+           ```
+        
+        2. **Check that files exist:**
+           ```bash
+           ls -la data/processed/
+           ```
+        
+        Files should include:
+        - `weather_master.csv`
+        - `collisions_master.csv`
+        """)
+    elif len(weather_df) == 0 or len(collisions_df) == 0:
+        st.warning("""
+        ## 📭 Data Files Are Empty
+        
+        The data files exist but contain no records. Please:
+        
+        1. **Run the pipeline to generate data:**
+           ```bash
+           python run_pipeline.py --days 30
+           ```
+        
+        2. **Check GitHub Actions ran successfully**
+        """)
+    else:
+        st.warning("Loading data...")
+
+# Footer
+st.markdown("---")
+st.markdown("""
+**NYC Traffic Safety Analysis** | Data Sources: NYC Open Data  
+*Automated ETL Pipeline: Extract → Transform → Load → Visualize*  
+*Updates daily via GitHub Actions*
+""")
