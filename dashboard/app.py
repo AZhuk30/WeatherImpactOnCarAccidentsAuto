@@ -1,6 +1,6 @@
 """
 Streamlit Dashboard for NYC Traffic Safety Analysis
-SIMPLIFIED VERSION - Works with sample data
+UPDATED VERSION - Works with enhanced API data
 """
 import streamlit as st
 import pandas as pd
@@ -27,7 +27,7 @@ st.sidebar.info("Data updates automatically via GitHub Actions daily at 2 AM UTC
 @st.cache_data(ttl=3600)
 def load_data():
     """
-    Load master CSV files
+    Load master CSV files with column compatibility
     """
     try:
         # Check if files exist
@@ -52,10 +52,33 @@ def load_data():
         elif 'crash_date' in collisions_df.columns:
             collisions_df['date'] = pd.to_datetime(collisions_df['crash_date'])
         
+        # ========== COLUMN COMPATIBILITY MAPPING ==========
+        # Map new API column names to old app column names
+        
+        # Weather columns
+        if 'temperature_2m' in weather_df.columns:
+            weather_df['temperature'] = weather_df['temperature_2m']
+        if 'weather_category' in weather_df.columns:
+            weather_df['condition'] = weather_df['weather_category']
+        
+        # Collision columns
+        if 'number_of_persons_injured' in collisions_df.columns:
+            collisions_df['persons_injured'] = collisions_df['number_of_persons_injured']
+        if 'number_of_persons_killed' in collisions_df.columns:
+            collisions_df['persons_killed'] = collisions_df['number_of_persons_killed']
+        
+        # Add weather_condition to collisions if it doesn't exist
+        # We can derive it from the weather category if available
+        if 'weather_condition' not in collisions_df.columns:
+            # For now, set a default - this could be enhanced with actual weather join
+            collisions_df['weather_condition'] = 'Clear'
+        
         return weather_df, collisions_df
         
     except Exception as e:
         st.error(f"Error loading data: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
         return None, None
 
 # Load data
@@ -130,15 +153,15 @@ if weather_df is not None and collisions_df is not None and len(weather_df) > 0 
     
     with col2:
         if 'persons_injured' in filtered_collisions.columns:
-            total_injuries = filtered_collisions['persons_injured'].sum()
-            st.metric("Total Injuries", f"{int(total_injuries):,}")
+            total_injuries = int(filtered_collisions['persons_injured'].sum())
+            st.metric("Total Injuries", f"{total_injuries:,}")
         else:
             st.metric("Total Injuries", "N/A")
     
     with col3:
         if 'persons_killed' in filtered_collisions.columns:
-            total_fatalities = filtered_collisions['persons_killed'].sum()
-            st.metric("Total Fatalities", int(total_fatalities))
+            total_fatalities = int(filtered_collisions['persons_killed'].sum())
+            st.metric("Total Fatalities", total_fatalities)
         else:
             st.metric("Total Fatalities", "N/A")
     
@@ -176,27 +199,33 @@ if weather_df is not None and collisions_df is not None and len(weather_df) > 0 
                     color_continuous_scale='reds',
                     labels={'count': 'Number of Collisions'}
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             else:
                 st.info("No collision data for selected filters")
         
         with col2:
-            # Create severity from injuries/killed
-            if 'persons_injured' in filtered_collisions.columns and 'persons_killed' in filtered_collisions.columns:
+            # Use severity_level if available, otherwise calculate from injuries
+            if 'severity_level' in filtered_collisions.columns:
+                severity_counts = filtered_collisions['severity_level'].value_counts().reset_index()
+                severity_counts.columns = ['severity', 'count']
+            elif 'persons_injured' in filtered_collisions.columns and 'persons_killed' in filtered_collisions.columns:
                 def assign_severity(row):
                     if row['persons_killed'] > 0:
-                        return 'Fatal'
+                        return 'FATAL'
                     elif row['persons_injured'] >= 3:
-                        return 'Severe'
+                        return 'SEVERE'
                     elif row['persons_injured'] > 0:
-                        return 'Injury'
+                        return 'MODERATE'
                     else:
-                        return 'Property Damage'
+                        return 'MINOR'
                 
                 filtered_collisions['severity'] = filtered_collisions.apply(assign_severity, axis=1)
                 severity_counts = filtered_collisions['severity'].value_counts().reset_index()
                 severity_counts.columns = ['severity', 'count']
-                
+            else:
+                severity_counts = None
+            
+            if severity_counts is not None and len(severity_counts) > 0:
                 fig = px.pie(
                     severity_counts, 
                     values='count', 
@@ -205,7 +234,7 @@ if weather_df is not None and collisions_df is not None and len(weather_df) > 0 
                     hole=0.3,
                     color_discrete_sequence=px.colors.sequential.Reds_r
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             else:
                 st.info("No severity data available")
     
@@ -213,10 +242,21 @@ if weather_df is not None and collisions_df is not None and len(weather_df) > 0 
         col1, col2 = st.columns(2)
         
         with col1:
-            # Simple weather vs collisions
-            if 'condition' in filtered_weather.columns and 'weather_condition' in filtered_collisions.columns:
-                # Count collisions by weather
-                weather_collisions = filtered_collisions['weather_condition'].value_counts().reset_index()
+            # Weather impact on collisions
+            if 'condition' in filtered_weather.columns and len(filtered_weather) > 0:
+                # Aggregate collisions by date and borough
+                collision_daily = filtered_collisions.groupby(['date', 'borough']).size().reset_index(name='collisions')
+                
+                # Aggregate weather by date and borough
+                weather_daily = filtered_weather.groupby(['date', 'borough']).agg({
+                    'condition': lambda x: x.mode()[0] if len(x) > 0 else 'Clear'
+                }).reset_index()
+                
+                # Merge them
+                merged = pd.merge(collision_daily, weather_daily, on=['date', 'borough'], how='left')
+                
+                # Count collisions by weather condition
+                weather_collisions = merged.groupby('condition')['collisions'].sum().reset_index()
                 weather_collisions.columns = ['weather', 'collisions']
                 
                 fig = px.bar(
@@ -228,21 +268,25 @@ if weather_df is not None and collisions_df is not None and len(weather_df) > 0 
                     color_continuous_scale='blues',
                     labels={'collisions': 'Number of Collisions'}
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             else:
                 st.info("No weather condition data available")
         
         with col2:
             if 'temperature' in filtered_weather.columns and len(filtered_weather) > 0:
+                # Convert Celsius to Fahrenheit if needed
+                temp_col = filtered_weather['temperature'].copy()
+                if temp_col.mean() < 50:  # Likely Celsius
+                    temp_col = (temp_col * 9/5) + 32
+                
                 fig = px.histogram(
-                    filtered_weather, 
-                    x='temperature',
-                    title="Temperature Distribution (°F)",
+                    temp_col, 
+                    title="Temperature Distribution",
                     nbins=20,
                     color_discrete_sequence=['orange'],
-                    labels={'temperature': 'Temperature (°F)'}
+                    labels={'value': 'Temperature (°F)', 'count': 'Frequency'}
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             else:
                 st.info("No temperature data available")
     
@@ -265,7 +309,7 @@ if weather_df is not None and collisions_df is not None and len(weather_df) > 0 
                     labels={'date': 'Date', 'collisions': 'Number of Collisions'}
                 )
                 fig.update_traces(line_color='#1f77b4')
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             else:
                 st.info("No data for daily trend")
         
@@ -282,7 +326,7 @@ if weather_df is not None and collisions_df is not None and len(weather_df) > 0 
                     title="Weather Condition Frequency",
                     hole=0.3
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             else:
                 st.info("No weather data available")
     
@@ -293,8 +337,12 @@ if weather_df is not None and collisions_df is not None and len(weather_df) > 0 
         
         with col1:
             st.write("**Weather Data**")
+            # Show relevant columns
+            display_cols = ['date', 'borough', 'temperature', 'precipitation', 'condition']
+            available_cols = [col for col in display_cols if col in filtered_weather.columns]
+            
             st.dataframe(
-                filtered_weather.head(50),
+                filtered_weather[available_cols].head(50),
                 use_container_width=True,
                 height=300
             )
@@ -302,22 +350,36 @@ if weather_df is not None and collisions_df is not None and len(weather_df) > 0 
             # Show weather stats
             if 'temperature' in filtered_weather.columns:
                 st.write("**Weather Statistics:**")
-                st.write(f"- Avg Temperature: {filtered_weather['temperature'].mean():.1f}°F")
-                st.write(f"- Rainy Days: {len(filtered_weather[filtered_weather['condition'].str.contains('Rain', na=False)])}")
+                temp_avg = filtered_weather['temperature'].mean()
+                # Convert to Fahrenheit if Celsius
+                if temp_avg < 50:
+                    temp_avg = (temp_avg * 9/5) + 32
+                st.write(f"- Avg Temperature: {temp_avg:.1f}°F")
+                
+                if 'precipitation' in filtered_weather.columns:
+                    st.write(f"- Avg Precipitation: {filtered_weather['precipitation'].mean():.2f} mm")
         
         with col2:
             st.write("**Collisions Data**")
+            # Show relevant columns
+            display_cols = ['date', 'borough', 'persons_injured', 'persons_killed', 'severity_level']
+            available_cols = [col for col in display_cols if col in filtered_collisions.columns]
+            
             st.dataframe(
-                filtered_collisions.head(50),
+                filtered_collisions[available_cols].head(50),
                 use_container_width=True,
                 height=300
             )
             
             # Show collision stats
             st.write("**Collision Statistics:**")
-            st.write(f"- Total Collisions: {len(filtered_collisions)}")
+            st.write(f"- Total Collisions: {len(filtered_collisions):,}")
             if 'persons_injured' in filtered_collisions.columns:
-                st.write(f"- Injury Rate: {(filtered_collisions['persons_injured'] > 0).sum() / len(filtered_collisions) * 100:.1f}%")
+                injury_rate = (filtered_collisions['persons_injured'] > 0).sum() / len(filtered_collisions) * 100
+                st.write(f"- Injury Rate: {injury_rate:.1f}%")
+            if 'persons_killed' in filtered_collisions.columns:
+                fatality_rate = (filtered_collisions['persons_killed'] > 0).sum() / len(filtered_collisions) * 100
+                st.write(f"- Fatality Rate: {fatality_rate:.1f}%")
     
     # ========== INSIGHTS ==========
     st.header("💡 Insights & Summary")
@@ -331,15 +393,25 @@ if weather_df is not None and collisions_df is not None and len(weather_df) > 0 
             insights.append(f"**{top_borough}** has the most collisions in the selected period")
         
         # Weather impact
-        if 'weather_condition' in filtered_collisions.columns:
-            weather_counts = filtered_collisions['weather_condition'].value_counts()
-            if 'Rain' in weather_counts.index:
-                rain_percentage = (weather_counts['Rain'] / len(filtered_collisions)) * 100
-                insights.append(f"**{rain_percentage:.1f}%** of collisions occurred during rainy conditions")
+        if 'condition' in filtered_weather.columns and len(filtered_weather) > 0:
+            # Count weather conditions
+            weather_counts = filtered_weather['condition'].value_counts()
+            if len(weather_counts) > 0:
+                top_condition = weather_counts.index[0]
+                percentage = (weather_counts.iloc[0] / len(filtered_weather)) * 100
+                insights.append(f"**{percentage:.1f}%** of the time had **{top_condition}** weather conditions")
         
         # Time pattern
-        if len(filtered_collisions) > 10:
-            insights.append(f"Average of **{len(filtered_collisions)/30:.1f} collisions per day** in the selected period")
+        if 'date' in filtered_collisions.columns:
+            days = (filtered_collisions['date'].max() - filtered_collisions['date'].min()).days + 1
+            if days > 0:
+                insights.append(f"Average of **{len(filtered_collisions)/days:.1f} collisions per day** in the selected period")
+        
+        # Injury statistics
+        if 'persons_injured' in filtered_collisions.columns:
+            total_injured = int(filtered_collisions['persons_injured'].sum())
+            if total_injured > 0:
+                insights.append(f"**{total_injured:,} people injured** in total during this period")
     
     if insights:
         for insight in insights:
@@ -420,4 +492,5 @@ st.markdown("""
 **NYC Traffic Safety Analysis** | Data Sources: NYC Open Data  
 *Automated ETL Pipeline: Extract → Transform → Load → Visualize*  
 *Updates daily via GitHub Actions*
+""")
 """)
