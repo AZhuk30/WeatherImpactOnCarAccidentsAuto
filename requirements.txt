@@ -1,6 +1,5 @@
 # Streamlit Cloud Compatible Requirements
 # Works with Python 3.12-3.13
-
 streamlit>=1.28.0,<2.0.0
 pandas>=2.0.0,<3.0.0
 plotly>=5.17.0,<6.0.0
@@ -8,3 +7,8 @@ numpy>=1.24.0,<2.0.0
 requests>=2.31.0,<3.0.0
 python-dateutil>=2.8.0,<3.0.0
 
+# API extraction dependencies
+requests-cache>=1.1.0,<2.0.0
+retry-requests>=2.0.0,<3.0.0
+openmeteo-requests>=1.1.0,<2.0.0
+pytz>=2023.3
