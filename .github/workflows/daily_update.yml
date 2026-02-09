@@ -58,17 +58,19 @@ jobs:
         echo "Collisions file size:"
         wc -l data/processed/collisions_master.csv || echo "Collisions file not found"
     
-    # 7. Commit updated data files
-    - name: Commit updated data
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        
-        # Check if there are changes to commit
-        if git diff --quiet; then
-          echo "No changes to commit"
-        else
-          git add data/processed/*.csv
-          git commit -m "🤖 Auto-update: Data refresh $(date '+%Y-%m-%d %H:%M')"
-          git push
-        fi
+# 7. Commit updated data files
+- name: Commit updated data
+  run: |
+    git config --local user.email "action@github.com"
+    git config --local user.name "GitHub Action"
+    
+    # Add the files
+    git add data/processed/*.csv
+    
+    # Check if there are STAGED changes to commit
+    if git diff --staged --quiet; then
+      echo "No changes to commit"
+    else
+      git commit -m "🤖 Auto-update: Data refresh $(date '+%Y-%m-%d %H:%M')"
+      git push
+    fi
