@@ -1,54 +1,77 @@
-import pandas as pd
-import logging
-import numpy as np  # Add this import
-
-logger = logging.getLogger(__name__)
-
 """
-Data transformation for NYC Traffic Safety
-Transforms raw extracted data into analysis-ready format
+Enhanced Data transformation for NYC Traffic Safety
+Keeps ALL useful data from APIs while maintaining compatibility
 """
-
 import pandas as pd
+import numpy as np
 import logging
 
 logger = logging.getLogger(__name__)
+
 
 def transform_weather_data(weather_df):
-    """Transform raw weather data into analysis format"""
+    """Transform raw weather data - KEEPS ALL USEFUL COLUMNS"""
     try:
         if weather_df.empty:
             logger.warning("⚠️ No weather data to transform")
             return pd.DataFrame()
         
-        # Make a copy
         df = weather_df.copy()
         
         # Ensure date column
         if 'date' not in df.columns and 'datetime' in df.columns:
-            df['date'] = pd.to_datetime(df['datetime']).dt.date
+            df['datetime'] = pd.to_datetime(df['datetime'])
+            df['date'] = df['datetime'].dt.date
         elif 'date' in df.columns:
-            df['date'] = pd.to_datetime(df['date'])
+            df['date'] = pd.to_datetime(df['date'], errors='coerce')
         
-        # Ensure borough column
-        if 'borough' not in df.columns:
-            df['borough'] = 'UNKNOWN'
+        # Extract time features from datetime
+        if 'datetime' in df.columns:
+            df['datetime'] = pd.to_datetime(df['datetime'])
+            df['hour_nyc'] = df['datetime'].dt.hour
+            df['day_of_week'] = df['datetime'].dt.day_name()
+            df['is_weekend'] = df['datetime'].dt.dayofweek >= 5
+            df['is_rush_hour'] = df['hour_nyc'].isin([7, 8, 9, 16, 17, 18])
+            df['is_night'] = (df['hour_nyc'] < 6) | (df['hour_nyc'] >= 20)
+            df['month'] = df['datetime'].dt.month
+            df['season'] = df['month'].map({
+                12: 'WINTER', 1: 'WINTER', 2: 'WINTER',
+                3: 'SPRING', 4: 'SPRING', 5: 'SPRING',
+                6: 'SUMMER', 7: 'SUMMER', 8: 'SUMMER',
+                9: 'FALL', 10: 'FALL', 11: 'FALL'
+            })
         
-        # Fill missing values
-        numeric_cols = ['temperature', 'precipitation', 'wind_speed']
-        for col in numeric_cols:
+        # Clean borough
+        if 'borough' in df.columns:
+            df['borough'] = df['borough'].str.upper()
+        
+        # Convert numeric columns
+        for col in ['temperature_2m', 'precipitation', 'visibility', 'rain', 'showers', 'snowfall', 'wind_speed_10m']:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
         
-        # Create condition categories
-        if 'condition' not in df.columns:
-            df['condition'] = 'Clear'
-        
-        # Select final columns
-        final_cols = ['date', 'borough', 'temperature', 'precipitation', 'condition', 'wind_speed']
-        available_cols = [col for col in final_cols if col in df.columns]
-        
-        df = df[available_cols]
+        # Weather categories
+        if 'precipitation' in df.columns:
+            conditions = []
+            choices = []
+            
+            if 'snowfall' in df.columns:
+                conditions.append(df['snowfall'] > 0)
+                choices.append('SNOW')
+            if 'rain' in df.columns:
+                conditions.append(df['rain'] > 0)
+                choices.append('RAIN')
+            
+            conditions.append(True)
+            choices.append('CLEAR')
+            
+            df['weather_category'] = np.select(conditions, choices, default='CLEAR')
+            df['weather_severity'] = np.select([
+                df['precipitation'] >= 10,
+                df['precipitation'] >= 5,
+                df['precipitation'] > 0,
+                True
+            ], ['SEVERE', 'MODERATE', 'LIGHT', 'LIGHT'], default='LIGHT')
         
         logger.info(f"✅ Transformed {len(df)} weather records")
         return df
@@ -57,66 +80,78 @@ def transform_weather_data(weather_df):
         logger.error(f"❌ Weather transformation failed: {e}")
         return pd.DataFrame()
 
+
 def transform_collision_data(collisions_df):
-    """Transform raw collision data into analysis format"""
+    """Transform raw collision data - KEEPS ALL USEFUL COLUMNS"""
     try:
         if collisions_df.empty:
             logger.warning("⚠️ No collision data to transform")
             return pd.DataFrame()
         
-        # Make a copy
         df = collisions_df.copy()
         
-        # Create date column from crash_date
+        # Parse crash date
         if 'crash_date' in df.columns:
-            df['date'] = pd.to_datetime(df['crash_date']).dt.date
-        else:
-            # Create date column if not exists
-            df['date'] = pd.Timestamp.now().date()
+            df['crash_date'] = pd.to_datetime(df['crash_date'], errors='coerce')
+            df['date'] = df['crash_date'].dt.date
+            df['hour'] = df['crash_date'].dt.hour
+            df['day_of_week'] = df['crash_date'].dt.day_name()
+            df['is_weekend'] = df['crash_date'].dt.dayofweek >= 5
+            df['is_rush_hour'] = df['hour'].isin([7, 8, 9, 16, 17, 18])
+            df['is_night'] = (df['hour'] < 6) | (df['hour'] >= 20)
+            df['month'] = df['crash_date'].dt.month
+            df['season'] = df['month'].map({
+                12: 'WINTER', 1: 'WINTER', 2: 'WINTER',
+                3: 'SPRING', 4: 'SPRING', 5: 'SPRING',
+                6: 'SUMMER', 7: 'SUMMER', 8: 'SUMMER',
+                9: 'FALL', 10: 'FALL', 11: 'FALL'
+            })
         
-        # Ensure borough column
-        if 'borough' not in df.columns:
-            df['borough'] = 'UNKNOWN'
+        # Clean borough
+        if 'borough' in df.columns:
+            df['borough'] = df['borough'].astype(str).str.upper().str.strip()
+            df['borough'] = df['borough'].map({
+                'MANHATTAN': 'MANHATTAN',
+                'BROOKLYN': 'BROOKLYN',
+                'QUEENS': 'QUEENS',
+                'BRONX': 'BRONX',
+                'STATEN ISLAND': 'STATEN ISLAND',
+                'STATEN IS': 'STATEN ISLAND'
+            }).fillna('OTHER')
+            df = df[df['borough'] != 'OTHER']
         
-        # Clean borough names
-        df['borough'] = df['borough'].astype(str).str.upper().str.strip()
+        # Convert injury/death columns
+        for col in ['number_of_persons_injured', 'number_of_persons_killed',
+                    'number_of_pedestrians_injured', 'number_of_pedestrians_killed',
+                    'number_of_cyclist_injured', 'number_of_cyclist_killed',
+                    'number_of_motorist_injured', 'number_of_motorist_killed']:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
         
-        # Standardize borough names
-        borough_mapping = {
-            'MANHATTAN': 'MANHATTAN',
-            'BROOKLYN': 'BROOKLYN',
-            'QUEENS': 'QUEENS',
-            'BRONX': 'BRONX',
-            'STATEN ISLAND': 'STATEN ISLAND',
-            'STATEN IS': 'STATEN ISLAND'
-        }
+        # Severity level
+        if 'number_of_persons_killed' in df.columns and 'number_of_persons_injured' in df.columns:
+            df['severity_level'] = np.select([
+                df['number_of_persons_killed'] > 0,
+                df['number_of_persons_injured'] >= 3,
+                df['number_of_persons_injured'] > 0,
+                True
+            ], ['FATAL', 'SEVERE', 'MODERATE', 'MINOR'], default='MINOR')
         
-        df['borough'] = df['borough'].map(borough_mapping).fillna('OTHER')
+        # Involvement flags
+        if 'number_of_pedestrians_injured' in df.columns:
+            df['involved_pedestrian'] = ((df['number_of_pedestrians_injured'] > 0) | 
+                                        (df.get('number_of_pedestrians_killed', 0) > 0))
+        if 'number_of_cyclist_injured' in df.columns:
+            df['involved_cyclist'] = ((df['number_of_cyclist_injured'] > 0) | 
+                                     (df.get('number_of_cyclist_killed', 0) > 0))
+        if 'vehicle_type_code2' in df.columns:
+            df['involved_multiple_vehicles'] = df['vehicle_type_code2'].notna()
         
-        # Calculate collisions per row (usually 1)
-        df['collisions'] = 1
-        
-        # Create severity column
-        if 'persons_killed' in df.columns:
-            df['persons_killed'] = pd.to_numeric(df['persons_killed'], errors='coerce').fillna(0)
-        else:
-            df['persons_killed'] = 0
-        
-        if 'persons_injured' in df.columns:
-            df['persons_injured'] = pd.to_numeric(df['persons_injured'], errors='coerce').fillna(0)
-        else:
-            df['persons_injured'] = 0
-        
-        # Create weather condition if not present
-        if 'weather_condition' not in df.columns:
-            df['weather_condition'] = 'Clear'
-        
-        # Select final columns
-        final_cols = ['date', 'borough', 'collisions', 'persons_injured', 
-                     'persons_killed', 'weather_condition']
-        available_cols = [col for col in final_cols if col in df.columns]
-        
-        df = df[available_cols]
+        # Location data
+        if 'latitude' in df.columns:
+            df['latitude'] = pd.to_numeric(df['latitude'], errors='coerce')
+        if 'longitude' in df.columns:
+            df['longitude'] = pd.to_numeric(df['longitude'], errors='coerce')
         
         logger.info(f"✅ Transformed {len(df)} collision records")
         return df
@@ -127,22 +162,10 @@ def transform_collision_data(collisions_df):
 
 
 def run_transformation(weather_df, collisions_df):
-    """
-    Main transformation function that runs both transformations
-    
-    Args:
-        weather_df (pd.DataFrame): Raw weather data
-        collisions_df (pd.DataFrame): Raw collision data
-    
-    Returns:
-        tuple: Transformed weather and collision DataFrames
-    """
+    """Main transformation function"""
     logger.info("🔄 Running data transformation")
     
-    # Transform weather data
     transformed_weather = transform_weather_data(weather_df)
-    
-    # Transform collision data
     transformed_collisions = transform_collision_data(collisions_df)
     
     logger.info(f"✅ Transformation complete:")
