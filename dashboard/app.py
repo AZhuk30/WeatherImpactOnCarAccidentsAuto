@@ -1,6 +1,6 @@
 import streamlit as st
 2
-3st.title("🎉 Hello from Streamlit!")
+st.title("🎉 Hello from Streamlit!")
 4st.write("If you see this, your deployment works!")
 5st.success("✅ App is running successfully")
 6
