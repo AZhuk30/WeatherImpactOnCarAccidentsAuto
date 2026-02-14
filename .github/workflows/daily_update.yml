@@ -67,7 +67,7 @@ jobs:
         head -2 data/processed/collisions_master.csv
         tail -2 data/processed/collisions_master.csv
         echo ""
-        echo "=== Git Status ==="
+        echo "=== Git Status Before Add ==="
         git status
     
     # 7. Commit updated data files
@@ -76,20 +76,28 @@ jobs:
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         
-        # Force add the files (even if unchanged)
-        git add -f data/processed/*.csv
+        # Force add files even if in .gitignore (use -f flag)
+        echo "Force adding data files..."
+        git add -f data/processed/weather_master.csv
+        git add -f data/processed/collisions_master.csv
+        git add -f data/processed/weather_daily_summary.csv
+        git add -f data/processed/collisions_daily_summary.csv
+        
+        echo "=== Git Status After Add ==="
+        git status
         
         # Get current timestamp
         TIMESTAMP=$(date '+%Y-%m-%d %H:%M UTC')
         
-        # Always commit - either data changed or keeping alive
+        # Check if files were actually staged
         if git diff --cached --quiet; then
-          echo "No data changes detected"
+          echo "No changes detected - making keep-alive commit"
           git commit --allow-empty -m "🤖 Keep-alive: Daily check completed - $TIMESTAMP"
         else
-          echo "Data changes detected, committing updates"
+          echo "Data files updated - committing changes"
           git commit -m "🤖 Auto-update: Data refresh $TIMESTAMP"
         fi
         
         # Always push
+        echo "Pushing to GitHub..."
         git push
