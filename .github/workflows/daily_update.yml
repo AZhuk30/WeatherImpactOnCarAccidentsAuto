@@ -65,10 +65,18 @@ jobs:
         # Add the files
         git add data/processed/*.csv
         
+        # Get current timestamp
+        TIMESTAMP=$(date '+%Y-%m-%d %H:%M UTC')
+        
         # Check if there are STAGED changes to commit
         if git diff --staged --quiet; then
-          echo "No changes to commit"
+          echo "No data changes detected"
+          # Make an empty commit to keep workflow active
+          git commit --allow-empty -m "🤖 Keep-alive: Daily check completed - $TIMESTAMP"
         else
-          git commit -m "🤖 Auto-update: Data refresh $(date '+%Y-%m-%d %H:%M')"
-          git push
+          echo "Data changes detected, committing updates"
+          git commit -m "🤖 Auto-update: Data refresh $TIMESTAMP"
         fi
+        
+        # Always push (either data update or keep-alive commit)
+        git push
