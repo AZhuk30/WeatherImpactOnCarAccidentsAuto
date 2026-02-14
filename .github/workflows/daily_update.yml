@@ -68,28 +68,7 @@ jobs:
         echo "Collisions file size:"
         wc -l data/processed/collisions_master.csv || echo "Collisions file not found"
     
-    # 6.5. Debug - Check actual data dates
-    - name: Debug data dates
-      run: |
-        echo "=== Weather Data Date Range ==="
-        echo "First 2 rows:"
-        head -2 data/processed/weather_master.csv
-        echo ""
-        echo "Last 2 rows:"
-        tail -2 data/processed/weather_master.csv
-        echo ""
-        echo "=== Collision Data Date Range ==="
-        echo "First 2 rows:"
-        head -2 data/processed/collisions_master.csv
-        echo ""
-        echo "Last 2 rows:"
-        tail -2 data/processed/collisions_master.csv
-        echo ""
-        echo "=== Checking for recent dates ==="
-        echo "Weather entries from Feb 10-14:"
-        grep "2026-02-1[0-4]" data/processed/weather_master.csv | wc -l || echo "No recent weather data"
-        echo "Collision entries from Feb 10-14:"
-        grep "2026-02-1[0-4]" data/processed/collisions_master.csv | wc -l || echo "No recent collision data"
+
     
     # 7. Commit updated data files
     - name: Commit updated data
