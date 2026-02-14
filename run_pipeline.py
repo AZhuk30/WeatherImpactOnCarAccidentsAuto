@@ -1,6 +1,6 @@
 """
 Complete ETL Pipeline for NYC Traffic Safety Analysis
-Now supports CSV-only mode for GitHub Actions deployment
+FIXED: Now uses today's date to get the most recent collision data
 """
 import logging
 import sys
@@ -33,11 +33,13 @@ def get_default_dates(days=30):
     
     Returns:
         tuple: (start_date, end_date) as strings
+    
+    FIXED: Now uses TODAY instead of yesterday to get most recent data
     """
     nyc_tz = pytz.timezone('America/New_York')
     
-    # End date: yesterday (most recent complete day)
-    end_date = datetime.now(nyc_tz) - timedelta(days=1)
+    # FIXED: End date is TODAY (not yesterday) - This ensures we get the most recent data available
+    end_date = datetime.now(nyc_tz)
     
     # Start date: N days before end date
     start_date = end_date - timedelta(days=days-1)
@@ -51,7 +53,7 @@ def run_pipeline(start_date: str = None, end_date: str = None, days: int = 30):
     
     Args:
         start_date: Start date (YYYY-MM-DD), defaults to N days ago
-        end_date: End date (YYYY-MM-DD), defaults to yesterday
+        end_date: End date (YYYY-MM-DD), defaults to TODAY
         days: Number of days to extract (default: 30)
     """
     
@@ -76,7 +78,7 @@ def run_pipeline(start_date: str = None, end_date: str = None, days: int = 30):
                 logger.info(f"Using default start date: {start_date}")
             if end_date is None:
                 end_date = default_end
-                logger.info(f"Using default end date: {end_date}")
+                logger.info(f"Using default end date: {end_date} (TODAY)")
         
         logger.info(f"📅 Date range: {start_date} to {end_date}")
         
@@ -311,7 +313,7 @@ def main():
     else:
         start_date = None
         end_date = None
-        print(f"📅 Getting latest {args.days} days of data (default)")
+        print(f"📅 Getting latest {args.days} days of data (includes TODAY)")
     
     print("\n" + "=" * 70)
     
