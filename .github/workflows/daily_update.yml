@@ -56,27 +56,40 @@ jobs:
         echo "Collisions file size:"
         wc -l data/processed/collisions_master.csv || echo "Collisions file not found"
     
+    # 6.5. Debug - Check actual data dates
+    - name: Debug data dates
+      run: |
+        echo "=== Weather Data Date Range ==="
+        head -2 data/processed/weather_master.csv
+        tail -2 data/processed/weather_master.csv
+        echo ""
+        echo "=== Collision Data Date Range ==="
+        head -2 data/processed/collisions_master.csv
+        tail -2 data/processed/collisions_master.csv
+        echo ""
+        echo "=== Git Status ==="
+        git status
+    
     # 7. Commit updated data files
     - name: Commit updated data
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         
-        # Add the files
-        git add data/processed/*.csv
+        # Force add the files (even if unchanged)
+        git add -f data/processed/*.csv
         
         # Get current timestamp
         TIMESTAMP=$(date '+%Y-%m-%d %H:%M UTC')
         
-        # Check if there are STAGED changes to commit
-        if git diff --staged --quiet; then
+        # Always commit - either data changed or keeping alive
+        if git diff --cached --quiet; then
           echo "No data changes detected"
-          # Make an empty commit to keep workflow active
           git commit --allow-empty -m "🤖 Keep-alive: Daily check completed - $TIMESTAMP"
         else
           echo "Data changes detected, committing updates"
           git commit -m "🤖 Auto-update: Data refresh $TIMESTAMP"
         fi
         
-        # Always push (either data update or keep-alive commit)
+        # Always push
         git push
