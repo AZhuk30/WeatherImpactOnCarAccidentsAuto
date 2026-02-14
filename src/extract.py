@@ -1,6 +1,7 @@
 """
 Data extraction from APIs for GitHub Actions
 Weather (Open-Meteo) + NYC Motor Vehicle Collisions
+FIXED: Properly fetches recent data with correct date handling
 """
 
 import logging
@@ -136,31 +137,61 @@ class CollisionExtractor:
     """Extract NYC motor vehicle collisions data"""
     
     def extract(self, start_date=None, end_date=None):
-        """Extract collision data - returns DataFrame"""
+        """Extract collision data - returns DataFrame
+        
+        FIXED: Now properly handles dates to fetch most recent data
+        """
         try:
             logger.info("🚗 Extracting collision data from NYC Open Data API")
             
             # Handle date parameters
             if end_date is None:
+                # Use today's date to ensure we get the most recent data
                 end_date = datetime.now().strftime("%Y-%m-%d")
+            
             if start_date is None:
-                start_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+                # Default to 30 days ago
+                start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
 
             logger.info(f"Fetching collisions from {start_date} to {end_date}")
 
-            # API parameters
+            # FIXED: Use proper date-time format and >= <= operators instead of BETWEEN
+            # This ensures we get ALL data including the most recent entries
             params = {
                 '$limit': 50000,
-                '$where': f"crash_date between '{start_date}' and '{end_date}'"
+                '$where': f"crash_date >= '{start_date}T00:00:00' AND crash_date <= '{end_date}T23:59:59'",
+                '$order': 'crash_date DESC'  # Get most recent first
             }
 
             # Make API call
+            logger.info(f"API Request: {NYC_COLLISIONS_API}")
+            logger.info(f"Query: {params['$where']}")
+            
             response = requests.get(NYC_COLLISIONS_API, params=params, timeout=30)
             response.raise_for_status()
             
             # Parse CSV response
             df = pd.read_csv(StringIO(response.text))
             logger.info(f"✅ Retrieved {len(df)} collision records")
+            
+            if len(df) > 0:
+                # Convert crash_date to datetime for analysis
+                df['crash_date'] = pd.to_datetime(df['crash_date'], errors='coerce')
+                
+                # Log date range of retrieved data
+                min_date = df['crash_date'].min()
+                max_date = df['crash_date'].max()
+                logger.info(f"📅 Data date range: {min_date} to {max_date}")
+                logger.info(f"📊 Records per day in last 7 days:")
+                
+                # Show last 7 days of data counts
+                recent_df = df[df['crash_date'] >= (datetime.now() - timedelta(days=7))]
+                if len(recent_df) > 0:
+                    daily_counts = recent_df.groupby(recent_df['crash_date'].dt.date).size()
+                    for date, count in daily_counts.items():
+                        logger.info(f"   {date}: {count} collisions")
+                else:
+                    logger.warning("⚠️  No data found in last 7 days")
             
             # Save raw data
             os.makedirs(RAW_DATA_DIR, exist_ok=True)
@@ -178,6 +209,8 @@ class CollisionExtractor:
             
         except Exception as e:
             logger.error(f"❌ Collision extraction failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return pd.DataFrame()
 
 
@@ -215,9 +248,9 @@ if __name__ == "__main__":
     print("TESTING EXTRACTION MODULE")
     print("="*60)
     
-    # Test with recent dates
-    test_start = "2024-01-01"
-    test_end = "2024-01-07"
+    # Test with recent dates - last 7 days
+    test_end = datetime.now().strftime("%Y-%m-%d")
+    test_start = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
     
     print(f"\nTesting with dates: {test_start} to {test_end}")
     
@@ -227,9 +260,17 @@ if __name__ == "__main__":
         print(f"✅ Collisions: {len(collisions)} rows")
         
         if len(weather) > 0:
-            print(f"\nWeather sample:\n{weather.head()}")
+            print(f"\nWeather date range: {weather['date'].min()} to {weather['date'].max()}")
+            print(f"Weather sample:\n{weather.head()}")
+            
         if len(collisions) > 0:
-            print(f"\nCollisions sample:\n{collisions.head()}")
+            print(f"\nCollisions date range: {collisions['crash_date'].min()} to {collisions['crash_date'].max()}")
+            print(f"Collisions sample:\n{collisions.head()}")
+            
+            # Show recent data
+            collisions['crash_date'] = pd.to_datetime(collisions['crash_date'])
+            recent = collisions[collisions['crash_date'] >= (datetime.now() - timedelta(days=3))]
+            print(f"\n📊 Collisions in last 3 days: {len(recent)}")
         
         print("\n" + "="*60)
         print("✅ ALL TESTS PASSED!")
