@@ -1,10 +1,12 @@
 """
 Enhanced Data transformation for NYC Traffic Safety
 Keeps ALL useful data from APIs while maintaining compatibility
+FIXED: Now properly saves transformed data to CSV files
 """
 import pandas as pd
 import numpy as np
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -162,14 +164,65 @@ def transform_collision_data(collisions_df):
 
 
 def run_transformation(weather_df, collisions_df):
-    """Main transformation function"""
+    """
+    Main transformation function
+    
+    FIXED: Now properly saves transformed data to CSV files in data/processed/
+    """
     logger.info("🔄 Running data transformation")
     
+    # Transform the data
     transformed_weather = transform_weather_data(weather_df)
     transformed_collisions = transform_collision_data(collisions_df)
     
     logger.info(f"✅ Transformation complete:")
     logger.info(f"   - Weather: {len(transformed_weather)} records")
     logger.info(f"   - Collisions: {len(transformed_collisions)} records")
+    
+    # CRITICAL FIX: Save transformed data to CSV files
+    # This was missing and is why the files only had headers!
+    try:
+        # Ensure output directory exists
+        os.makedirs('data/processed', exist_ok=True)
+        
+        # Save weather data
+        if len(transformed_weather) > 0:
+            weather_file = 'data/processed/weather_master.csv'
+            transformed_weather.to_csv(weather_file, index=False)
+            logger.info(f"💾 Saved {len(transformed_weather):,} weather records to {weather_file}")
+            
+            # Also create a daily summary
+            if 'date' in transformed_weather.columns and 'borough' in transformed_weather.columns:
+                daily_summary = transformed_weather.groupby(['date', 'borough']).agg({
+                    'temperature_2m': 'mean',
+                    'precipitation': 'sum',
+                    'wind_speed_10m': 'mean'
+                }).reset_index()
+                daily_summary.to_csv('data/processed/weather_daily_summary.csv', index=False)
+                logger.info(f"💾 Saved weather daily summary")
+        else:
+            logger.warning("⚠️  No weather data to save")
+        
+        # Save collision data
+        if len(transformed_collisions) > 0:
+            collisions_file = 'data/processed/collisions_master.csv'
+            transformed_collisions.to_csv(collisions_file, index=False)
+            logger.info(f"💾 Saved {len(transformed_collisions):,} collision records to {collisions_file}")
+            
+            # Also create a daily summary
+            if 'date' in transformed_collisions.columns and 'borough' in transformed_collisions.columns:
+                daily_summary = transformed_collisions.groupby(['date', 'borough']).size().reset_index(name='collision_count')
+                if 'severity_level' in transformed_collisions.columns:
+                    severity_summary = transformed_collisions.groupby(['date', 'borough', 'severity_level']).size().unstack(fill_value=0)
+                    daily_summary = daily_summary.merge(severity_summary, on=['date', 'borough'], how='left')
+                daily_summary.to_csv('data/processed/collisions_daily_summary.csv', index=False)
+                logger.info(f"💾 Saved collision daily summary")
+        else:
+            logger.warning("⚠️  No collision data to save")
+            
+    except Exception as e:
+        logger.error(f"❌ Failed to save CSV files: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
     
     return transformed_weather, transformed_collisions
