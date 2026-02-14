@@ -38,6 +38,18 @@ jobs:
         mkdir -p data/raw
         mkdir -p data/logs
     
+    # 4.5. Clear API cache and old data
+    - name: Clear cache and old data
+      run: |
+        echo "Clearing any cached API data..."
+        rm -f .cache.sqlite
+        rm -rf __pycache__
+        rm -rf src/__pycache__
+        find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+        echo "Clearing old raw data files..."
+        rm -f data/raw/*.csv
+        echo "Cache cleared successfully"
+    
     # 5. Run ETL Pipeline
     - name: Run ETL Pipeline
       run: |
@@ -60,15 +72,24 @@ jobs:
     - name: Debug data dates
       run: |
         echo "=== Weather Data Date Range ==="
+        echo "First 2 rows:"
         head -2 data/processed/weather_master.csv
+        echo ""
+        echo "Last 2 rows:"
         tail -2 data/processed/weather_master.csv
         echo ""
         echo "=== Collision Data Date Range ==="
+        echo "First 2 rows:"
         head -2 data/processed/collisions_master.csv
+        echo ""
+        echo "Last 2 rows:"
         tail -2 data/processed/collisions_master.csv
         echo ""
-        echo "=== Git Status Before Add ==="
-        git status
+        echo "=== Checking for recent dates ==="
+        echo "Weather entries from Feb 10-14:"
+        grep "2026-02-1[0-4]" data/processed/weather_master.csv | wc -l || echo "No recent weather data"
+        echo "Collision entries from Feb 10-14:"
+        grep "2026-02-1[0-4]" data/processed/collisions_master.csv | wc -l || echo "No recent collision data"
     
     # 7. Commit updated data files
     - name: Commit updated data
@@ -76,22 +97,15 @@ jobs:
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         
-        # Force add files even if in .gitignore (use -f flag)
-        echo "Force adding data files..."
-        git add -f data/processed/weather_master.csv
-        git add -f data/processed/collisions_master.csv
-        git add -f data/processed/weather_daily_summary.csv
-        git add -f data/processed/collisions_daily_summary.csv
-        
-        echo "=== Git Status After Add ==="
-        git status
+        # Add the processed CSV files
+        git add data/processed/*.csv
         
         # Get current timestamp
         TIMESTAMP=$(date '+%Y-%m-%d %H:%M UTC')
         
-        # Check if files were actually staged
-        if git diff --cached --quiet; then
-          echo "No changes detected - making keep-alive commit"
+        # Check if there are changes
+        if git diff --staged --quiet; then
+          echo "No data changes detected - making keep-alive commit"
           git commit --allow-empty -m "🤖 Keep-alive: Daily check completed - $TIMESTAMP"
         else
           echo "Data files updated - committing changes"
